@@ -68,7 +68,7 @@ export function streamChat({ token, baseUrl, chatPath, model, messages, onChunk,
         if (raw === '[DONE]') { onDone(); return }
         try {
           const json = JSON.parse(raw)
-          const delta = json?.choices?.[0]?.delta?.content
+          const delta = json?.choices?.[0]?.delta?.content ?? json?.choices?.[0]?.message?.content
           if (delta) onChunk(delta)
         } catch {
           // skip non-JSON lines

@@ -1,6 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { streamChat } from '../api/index.js'
-import { saveFileContent } from '../api/index.js'
+import { streamChat, saveFileContent } from '../api/index.js'
 
 function parseFileEdits(text) {
   const edits = []
@@ -12,14 +11,56 @@ function parseFileEdits(text) {
   return edits
 }
 
-function Message({ msg, onApplyEdit }) {
+function renderMarkdown(text) {
+  if (!text) return null
+  const CODE_BLOCK = /```(\w*)\n?([\s\S]*?)```/g
+  const segments = []
+  let last = 0
+  let m
+
+  while ((m = CODE_BLOCK.exec(text)) !== null) {
+    if (m.index > last) segments.push({ t: 'text', v: text.slice(last, m.index) })
+    segments.push({ t: 'code', lang: m[1] || '', v: m[2].replace(/\n$/, '') })
+    last = m.index + m[0].length
+  }
+  if (last < text.length) segments.push({ t: 'text', v: text.slice(last) })
+
+  return segments.map((s, i) => {
+    if (s.t === 'code') {
+      return (
+        <div key={i} className="md-code-block">
+          <div className="md-code-header">
+            <span className="md-code-lang">{s.lang || 'code'}</span>
+          </div>
+          <pre className="md-code-body">{s.v}</pre>
+        </div>
+      )
+    }
+    const inlineParts = s.v.split(/(`[^`\n]+`)/g)
+    const content = inlineParts.map((p, k) =>
+      p.match(/^`[^`]+`$/)
+        ? <code key={k} className="md-inline-code">{p.slice(1, -1)}</code>
+        : p
+    )
+    return <span key={i} className="md-text">{content}</span>
+  })
+}
+
+function TypingDots() {
+  return (
+    <div className="typing-dots">
+      <span /><span /><span />
+    </div>
+  )
+}
+
+function Message({ msg, onApplyEdit, isStreaming }) {
   const edits = msg.role === 'assistant' ? parseFileEdits(msg.content) : []
   const [applying, setApplying] = useState({})
   const [applied, setApplied] = useState({})
 
   const displayContent = msg.content.replace(
-    /<file_edit\s+path="[^"]+">([\s\S]*?)<\/file_edit>/g,
-    ''
+    /<file_edit\s+path="[^"]+">([\s\S]*?)<\/file_edit>/g, ''
   ).trim()
 
   async function handleApply(edit, idx) {
@@ -35,21 +76,33 @@ function Message({ msg, onApplyEdit }) {
     }
   }
 
+  const isUser = msg.role === 'user'
+
   return (
-    <div className={`message message-${msg.role}`}>
-      <div className="message-role">{msg.role === 'user' ? 'Sen' : 'AI'}</div>
-      <div className="message-content">
-        {displayContent && <pre className="message-text">{displayContent}</pre>}
+    <div className={`msg msg-${msg.role}`}>
+      <div className="msg-avatar">{isUser ? 'S' : 'AI'}</div>
+      <div className="msg-body">
+        {isUser ? (
+          <div className="msg-bubble-user">{displayContent}</div>
+        ) : (
+          <div className="msg-bubble-ai">
+            {displayContent === '' && isStreaming
+              ? <TypingDots />
+              : <div className="msg-markdown">{renderMarkdown(displayContent)}</div>
+            }
+          </div>
+        )}
         {edits.map((edit, idx) => (
           <div className="edit-block" key={idx}>
             <div className="edit-header">
+              <span className="edit-path-icon">📄</span>
               <span className="edit-path">{edit.path}</span>
               <button
                 className={`btn-apply ${applied[idx] ? 'applied' : ''}`}
                 onClick={() => handleApply(edit, idx)}
                 disabled={applying[idx] || applied[idx]}
               >
-                {applied[idx] ? '✓ Uygulandı' : applying[idx] ? 'Uygulanıyor...' : 'Dosyaya Uygula'}
+                {applied[idx] ? '✓ Uygulandı' : applying[idx] ? '⟳ Uygulanıyor' : '↓ Uygula'}
               </button>
             </div>
             <pre className="edit-content">{edit.content}</pre>
@@ -67,6 +120,7 @@ export default function ChatPanel({ session, contextFiles }) {
   const [error, setError] = useState('')
   const messagesEndRef = useRef(null)
   const stopRef = useRef(null)
+  const textareaRef = useRef(null)
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -85,6 +139,7 @@ export default function ChatPanel({ session, contextFiles }) {
     const userMsg = { role: 'user', content: input.trim() }
     setInput('')
     setError('')
+    textareaRef.current?.focus()
 
     const systemPrompt = buildSystemPrompt()
     const apiMessages = []
@@ -131,6 +186,7 @@ export default function ChatPanel({ session, contextFiles }) {
       <div className="chat-messages">
         {messages.length === 0 && (
           <div className="chat-empty">
+            <div className="chat-empty-icon">✦</div>
             <p>Kod hakkında soru sor veya değişiklik talep et.</p>
             {contextFiles?.length > 0 && (
               <p className="chat-context-info">{contextFiles.length} dosya bağlama eklendi</p>
@@ -138,7 +194,11 @@ export default function ChatPanel({ session, contextFiles }) {
           </div>
         )}
         {messages.map((msg, i) => (
-          <Message key={i} msg={msg} />
+          <Message
+            key={i}
+            msg={msg}
+            isStreaming={streaming && i === messages.length - 1}
+          />
         ))}
         {error && <div className="chat-error">{error}</div>}
         <div ref={messagesEndRef} />
@@ -146,10 +206,17 @@ export default function ChatPanel({ session, contextFiles }) {
 
       <div className="chat-input-area">
         {contextFiles?.length > 0 && (
-          <div className="context-badge">{contextFiles.length} dosya bağlamda</div>
+          <div className="context-chips">
+            {contextFiles.map((f, i) => (
+              <span key={i} className="context-chip">
+                {f.path.split(/[/\\]/).pop()}
+              </span>
+            ))}
+          </div>
         )}
         <div className="chat-input-row">
           <textarea
+            ref={textareaRef}
             className="chat-input"
             value={input}
             onChange={e => setInput(e.target.value)}
@@ -159,7 +226,7 @@ export default function ChatPanel({ session, contextFiles }) {
                 sendMessage()
               }
             }}
-            placeholder="Mesajınızı yazın... (Enter: gönder, Shift+Enter: satır)"
+            placeholder="Mesajınızı yazın… (Enter gönder · Shift+Enter satır)"
             rows={3}
             disabled={streaming}
           />
@@ -168,7 +235,7 @@ export default function ChatPanel({ session, contextFiles }) {
             onClick={streaming ? handleStop : sendMessage}
             disabled={!streaming && !input.trim()}
           >
-            {streaming ? '■ Durdur' : '▶ Gönder'}
+            {streaming ? '■' : '↑'}
           </button>
         </div>
       </div>

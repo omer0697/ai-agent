@@ -28,10 +28,7 @@ export default function Login({ onLogin }) {
     <div className="login-container">
       <div className="login-box">
         <div className="login-logo">
-          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <circle cx="12" cy="12" r="10"/>
-            <path d="M12 8v4l3 3"/>
-          </svg>
+          <div className="login-logo-icon">✦</div>
           <h1>AI Agent</h1>
         </div>
         <p className="login-subtitle">LLM Gateway ile bağlan</p>
